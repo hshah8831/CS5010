@@ -1,0 +1,98 @@
+;; The first three lines of this file were inserted by DrRacket. They record metadata
+;; about the language level of this file in a form that our tools can easily process.
+#reader(lib "htdp-intermediate-lambda-reader.ss" "lang")((modname server) (read-case-sensitive #t) (teachpacks ()) (htdp-settings #(#t constructor repeating-decimal #f #t none #f ())))
+#lang racket
+(require 2htdp/universe)
+(require 2htdp/image)
+
+;; An IWorld represents a client connected to the server.
+;; IWorld is an opaque value that can only be compared for equality.
+
+;; A Universe is a (make-univ ListOf<IWorld> ListOf<IWorld>)
+;; Represents the server state: 
+;; - list of connected clients 
+;; - list of clients who have sent server a msg
+(define-struct univ (conn recv))
+
+(define (add-conn u iw)
+  (make-univ (cons iw (univ-conn u)) 
+             (univ-recv u)))
+(define (add-recv u iw)
+  (make-univ (univ-conn u) 
+             (cons iw (univ-recv u))))
+(define (remove-iw u iw)
+  (make-univ (remove iw (univ-conn u) iworld=?)
+             (remove iw (univ-recv u) iworld=?)))
+
+;; A Mail is a (make-mail IWorld Message)
+;; A Message is an SExpr.
+
+;; A Bundle is a (make-bundle Universe ListOf<Mail> ListOf<IWorld>)
+
+;; send content to all IWorlds in univ
+(define (create-mails univ content)
+  (map (Î» (w) (make-mail w content)) univ))
+;; send content to iw
+(define (create-mail iw content)
+  (list (make-mail iw content)))
+
+(define SECRET2 "Enjoy spring break!")
+(define SECRET1 "You are connected.")
+
+;; connect : Universe IWorld -> Bundle
+(define (connect univ iw)
+  (make-bundle (add-conn univ iw) 
+               (create-mail iw SECRET1)
+               '()))
+
+;; process-msg : Universe IWorld Message -> Bundle
+(define (process-msg univ iw msg)
+  (cond
+    [(string=? msg SECRET1)
+     (make-bundle (add-recv univ iw) 
+                  (create-mail iw SECRET2)
+                  '())]
+     [else (make-bundle univ '() '())]))
+     
+(define (disconnect univ iw)
+  (make-bundle (remove-iw univ iw) '() (list iw)))
+               
+; the current Universe, shared between universe and big-bang threads
+(define U (make-univ empty empty)) 
+
+;; renders big-bang
+(define (render u)
+  (overlay/align
+   "left" "top"
+   (apply above/align
+          "left"
+          empty-image
+          empty-image
+          (for/list ([iw (univ-conn U)])
+            (text (string-append 
+                   (iworld-name iw)
+                   ": connected"
+                   (if (member iw (univ-recv U))
+                       ", received the secret msg"
+                       ""))
+                  32 "black")))
+   (empty-scene 800 800)))
+(define (tick-univ u)
+  (set! U u) 
+  u)
+(define (tick-world w)
+  U)
+
+(define (server-start)
+  (thread 
+   (lambda ()
+   (universe U 
+             (on-new connect)
+             (on-tick tick-univ)
+             (on-msg process-msg)
+             (on-disconnect disconnect)
+             (port 5010))))
+  (thread (lambda ()
+            (big-bang U
+                      (on-tick tick-world)
+                      (on-draw render)))))
